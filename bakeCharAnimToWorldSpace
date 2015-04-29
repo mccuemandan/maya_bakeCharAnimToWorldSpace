@@ -1,0 +1,111 @@
+﻿import maya.cmds as cmds
+
+selected = cmds.ls(sl=True)
+print "selected: " + str(selected)
+
+# Derive namespace based on selected orient
+def defineNamespace(orient):
+    orientString = str(orient)
+    namespaceColonIndex = orientString.find(":")
+    
+    if namespaceColonIndex == -1:
+          namespace = ""
+          print "no namespace"
+    else:
+          namespace = orientString[0:(namespaceColonIndex + 1)]
+          # remove "[u'" before the namespace (weird unicode from cmds.ls(sl=True)
+          namespace = namespace[3:namespaceColonIndex + 3]
+    return namespace
+
+# Define namespace
+namespace = defineNamespace(selected)
+
+# Define controls
+orientControl = namespace + "orient"
+rootControl = namespace + "root_ctrl"
+legControlR = namespace + "leg_ctrl_R"
+legControlL = namespace + "leg_ctrl_L"
+armControlR = namespace + "arm_ctrl_R"
+armControlL = namespace + "arm_ctrl_L"
+
+
+# Determine objects to bake
+objectsToBake = [orientControl, rootControl]
+
+# Function: determine which limb controls need baking
+def determineBake(control):
+    worldAttribute = str(control) + ".world"
+    if cmds.getAttr(worldAttribute) == 1:
+        return objectsToBake.append(control)
+    # if check for animation on world space attribute:
+    elif cmds.listConnections(worldAttribute, type='animCurve') != None:
+        return objectsToBake.append(control)              
+    else:
+        print "skip " + worldAttribute
+
+determineBake(legControlR)
+determineBake(legControlL)
+determineBake(armControlR)
+determineBake(armControlL)
+
+# Function: remove non-animated controls from baking queue
+def skipKeylessControl(control):
+    for i in objectsToBake:
+          currentObject = i
+          animCurves = cmds.listConnections(i, type='animCurve')
+          if animCurves == "None":
+              objectsToBake.remove(i)
+
+print "objects to bake: " + str(objectsToBake)
+
+
+# Get Start and End Frame of Time Slider
+startFrame = cmds.playbackOptions(q=True,minTime=True)
+endFrame = cmds.playbackOptions(q=True,maxTime=True)
+
+# Function: create locators that have world space animation data of objects in baking queue
+def bakeWorldLocators(objectsToBake):
+    # cycle through each selected object
+    for i in objectsToBake:
+        currentObject = i
+
+        # create a corresponding locator - named "loc_object_animBaked"
+        locatorName = str("loc_" + i + "_animBaked")
+        cmds.spaceLocator( n = locatorName)
+
+        # parent constrain locator to object with offset off
+        parentConstrainName = str(locatorName + "_parentConstrain")
+        cmds.parentConstraint(currentObject, locatorName, mo = 0, n = parentConstrainName)
+
+        # bake locator translate and rotation animation based on timeslider
+        cmds.bakeResults( locatorName, t=(startFrame, endFrame)) 
+
+        # delete parent constrain on locator 
+        cmds.delete(parentConstrainName)
+
+# Function: bakes controls to locators with the world space animation data
+def bakeToLocators(objectsToBake):
+    # bake control curves, delete parent constrains/locators
+    for i in objectsToBake:
+        currentCurve = i
+        currentLocator = str("loc_" + i + "_animBaked")
+
+        # parent constrain objects to locators
+        parentConstrainName = str(currentCurve + "_parentConstrain")
+        cmds.parentConstraint(currentLocator, currentCurve, mo = 0, n = parentConstrainName)
+
+        # bake curve animation
+        cmds.bakeResults(currentCurve, t=(startFrame, endFrame)) 
+
+        # delete parent constraints and locators
+        cmds.delete(parentConstrainName)
+        cmds.delete(currentLocator)
+
+# Execution Function: Bake a character animation to world space
+def bakeCharacterToWorld():
+    bakeWorldLocators(objectsToBake)
+    cmds.parent(orientControl, world = True)
+    bakeToLocators(objectsToBake)
+
+
+bakeCharacterToWorld()
